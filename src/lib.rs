@@ -4,11 +4,14 @@ mod state;
 #[cfg(not(feature = "library"))]
 pub mod entry {
     use cosmwasm_std::{entry_point, to_binary};
-    use cosmwasm_std::{Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult};
+    use cosmwasm_std::{Addr, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdError, StdResult};
 
+    use cw721::Cw721Contract;
     use cw721_metadata_onchain::Cw721MetadataContract;
 
     pub use cw721_base::{ContractError, MintMsg, MinterResponse, QueryMsg};
+    pub use cw721_base::state::TokenInfo;
+
 
     pub use crate::msg::{ExecuteMsg, InstantiateMsg, MsgMap};
     use crate::state::Configuration;
@@ -53,11 +56,11 @@ pub mod entry {
     ) -> Result<Response, ContractError> {
         match msg {
             ExecuteMsg::StubMsg {
-                token_id: _,
-                token_uri: _,
-                owner_id: _,
-                attributes: _,
-            } => Ok(Response::default()),
+                token_id,
+                token_uri,
+                owner_id,
+                attributes,
+            } => stub(deps, attributes, token_uri, token_id, owner_id),
             _ => Cw721MetadataContract::default().execute(
                 deps,
                 env,
@@ -75,6 +78,60 @@ pub mod entry {
                 to_binary(&Configuration::get_static_token(deps.storage)?)
             }
             _ => Cw721MetadataContract::default().query(deps, env, msg),
+        }
+    }
+
+    fn stub(
+        deps: DepsMut,
+        attributes: &str,
+        token_uri: &str,
+        token_id: &str,
+        owner_id: &str,
+        contract: &Cw721Contract,
+    ) -> Result<Response, ContractError> {
+        if let Ok(ext) = serde_json_wasm::from_str(attributes) {
+
+            if token_uri.is_empty() {
+                return Err(ContractError::Std(StdError::generic_err("token_uri must not be empty".to_string())));
+            }
+
+            if token_id.is_empty() {
+                return Err(ContractError::Std(StdError::generic_err("token_id must not be empty".to_string())));
+            }
+
+            let owner: Addr = deps.api.addr_validate(owner_id)?;
+
+            let token = TokenInfo {
+                owner,
+                approvals: vec![],
+                token_uri: Some(token_uri.to_string()),
+                extension: ext,
+            };
+
+            if let Ok(_x) = contract.tokens_uri.load(deps.storage, token_uri) {
+                return Err(ContractError::Claimed {});
+            }
+
+            contract.tokens
+                .update(deps.storage, token_id, |old| match old {
+                    Some(_) => Err(ContractError::Claimed {}),
+                    None => Ok(token),
+                })?;
+
+            contract.tokens_uri
+                .update(deps.storage, token_uri, |old| match old {
+                    Some(_) => Err(ContractError::Claimed {}),
+                    None => Ok(token_uri.clone()),
+                })?;
+
+            contract.increment_tokens(deps.storage)?;
+
+            Ok(Response::new()
+                .add_attribute("action", "mint")
+                .add_attribute("minter", minter)
+                .add_attribute("token_id", token_id))
+        } else {
+            Err(ContractError::Std(StdError::generic_err("Unable to deserialize attributes".to_string())))
         }
     }
 }
