@@ -1,20 +1,64 @@
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+
 use cosmwasm_std::{Addr, Api, Response, StdError, StdResult, Storage};
 use cw721::NftInfoResponse;
+use cw721_base::state::TokenInfo;
 use cw721_metadata_onchain::Metadata;
-use cw_storage_plus::Item;
+use cw_storage_plus::{Index, IndexList, IndexedMap, Item, MultiIndex};
 
 use crate::msg::InstantiateMsg;
 
-pub struct Configuration {
-    pub always_owner: Option<String>,
-    pub static_token: Option<String>,
+/// Lifted from TerraPeeps as an indexed data type witihin Terra (CW) storage.
+pub struct TokenIndexString<'a> {
+    // pk goes to second tuple element
+    pub owner: MultiIndex<'a, (String, Vec<u8>), String>,
 }
 
-impl<'a> Configuration {
+impl<'a> IndexList<String> for TokenIndexString<'a> {
+    fn get_indexes(&'_ self) -> Box<dyn Iterator<Item = &'_ dyn Index<String>> + '_> {
+        let v: Vec<&dyn Index<String>> = vec![&self.owner];
+        Box::new(v.into_iter())
+    }
+}
+
+pub struct Configuration<'a> {
+    pub always_owner: Option<String>,
+    pub static_token: Option<String>,
+    pub token_uris: IndexedMap<'a, &'a str, String, TokenIndexString<'a>>,
+}
+
+pub fn token_owner_idx<T>(d: &TokenInfo<T>, k: Vec<u8>) -> (Addr, Vec<u8>) {
+    (d.owner.clone(), k)
+}
+
+pub struct TokenIndexes<'a, T>
+where
+    T: Serialize + DeserializeOwned + Clone,
+{
+    // pk goes to second tuple element
+    pub owner: MultiIndex<'a, (Addr, Vec<u8>), TokenInfo<T>>,
+}
+
+#[allow(clippy::ptr_arg)]
+pub fn token_owner_idx_string(d: &String, k: Vec<u8>) -> (String, Vec<u8>) {
+    (d.clone(), k)
+}
+
+impl<'a> Configuration<'_> {
     pub fn from_msg(msg: &InstantiateMsg) -> Configuration {
+        let indexes: TokenIndexes<'_, Metadata> = TokenIndexes {
+            owner: MultiIndex::new(token_owner_idx, "tokens", "tokens__owner"),
+        };
+
+        let uri_indexes = TokenIndexString {
+            owner: MultiIndex::new(token_owner_idx_string, "tokens_uri", "tokens_uri__owner"),
+        };
+
         Configuration {
             always_owner: msg.always_owner.clone(),
             static_token: msg.static_token.clone(),
+            token_uris: IndexedMap::new("tokens", uri_indexes),
         }
     }
 

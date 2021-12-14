@@ -6,7 +6,7 @@ pub mod entry {
     use cosmwasm_std::{entry_point, to_binary};
     use cosmwasm_std::{Addr, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdError, StdResult};
 
-    use cw721::Cw721Contract;
+    use cw721_base::Cw721Contract;
     use cw721_metadata_onchain::Cw721MetadataContract;
 
     pub use cw721_base::{ContractError, MintMsg, MinterResponse, QueryMsg};
@@ -87,9 +87,9 @@ pub mod entry {
         token_uri: &str,
         token_id: &str,
         owner_id: &str,
-        contract: &Cw721Contract,
     ) -> Result<Response, ContractError> {
         if let Ok(ext) = serde_json_wasm::from_str(attributes) {
+            let contract = Cw721Contract::default();
 
             if token_uri.is_empty() {
                 return Err(ContractError::Std(StdError::generic_err("token_uri must not be empty".to_string())));
@@ -125,6 +125,8 @@ pub mod entry {
                 })?;
 
             contract.increment_tokens(deps.storage)?;
+
+            let minter = contract.minter.load(deps.storage)?;
 
             Ok(Response::new()
                 .add_attribute("action", "mint")
