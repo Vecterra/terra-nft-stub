@@ -4,14 +4,15 @@ mod state;
 #[cfg(not(feature = "library"))]
 pub mod entry {
     use cosmwasm_std::{entry_point, to_binary};
-    use cosmwasm_std::{Addr, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdError, StdResult};
+    use cosmwasm_std::{
+        Addr, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdError, StdResult,
+    };
 
     use cw721_base::Cw721Contract;
-    use cw721_metadata_onchain::Cw721MetadataContract;
+    use cw721_metadata_onchain::{Cw721MetadataContract, Metadata};
 
-    pub use cw721_base::{ContractError, MintMsg, MinterResponse, QueryMsg};
     pub use cw721_base::state::TokenInfo;
-
+    pub use cw721_base::{ContractError, MintMsg, MinterResponse, QueryMsg};
 
     pub use crate::msg::{ExecuteMsg, InstantiateMsg, MsgMap};
     use crate::state::Configuration;
@@ -39,7 +40,7 @@ pub mod entry {
         info: MessageInfo,
         msg: InstantiateMsg,
     ) -> StdResult<Response> {
-        let cfg = Configuration::from_msg(&msg);
+        let cfg = Configuration::from_msg::<Metadata>(&msg);
 
         cfg.store(deps.api, deps.storage)?;
 
@@ -60,7 +61,7 @@ pub mod entry {
                 token_uri,
                 owner_id,
                 attributes,
-            } => stub(deps, attributes, token_uri, token_id, owner_id),
+            } => stub::<String>(deps, &attributes, &token_uri, &token_id, &owner_id),
             _ => Cw721MetadataContract::default().execute(
                 deps,
                 env,
@@ -81,7 +82,7 @@ pub mod entry {
         }
     }
 
-    fn stub(
+    fn stub<C>(
         deps: DepsMut,
         attributes: &str,
         token_uri: &str,
@@ -89,40 +90,33 @@ pub mod entry {
         owner_id: &str,
     ) -> Result<Response, ContractError> {
         if let Ok(ext) = serde_json_wasm::from_str(attributes) {
-            let contract = Cw721Contract::default();
+            let contract = Cw721Contract::<'_, Metadata, C>::default();
 
             if token_uri.is_empty() {
-                return Err(ContractError::Std(StdError::generic_err("token_uri must not be empty".to_string())));
+                return Err(ContractError::Std(StdError::generic_err(
+                    "token_uri must not be empty".to_string(),
+                )));
             }
 
             if token_id.is_empty() {
-                return Err(ContractError::Std(StdError::generic_err("token_id must not be empty".to_string())));
+                return Err(ContractError::Std(StdError::generic_err(
+                    "token_id must not be empty".to_string(),
+                )));
             }
 
             let owner: Addr = deps.api.addr_validate(owner_id)?;
 
-            let token = TokenInfo {
+            let token: TokenInfo<Metadata> = TokenInfo {
                 owner,
                 approvals: vec![],
                 token_uri: Some(token_uri.to_string()),
                 extension: ext,
             };
 
-            if let Ok(_x) = contract.tokens_uri.load(deps.storage, token_uri) {
-                return Err(ContractError::Claimed {});
-            }
+            Configuration::claimed(deps.storage, token_uri)?;
+            Configuration::store_token_by_uri::<Metadata>(deps.storage, token_uri)?;
 
-            contract.tokens
-                .update(deps.storage, token_id, |old| match old {
-                    Some(_) => Err(ContractError::Claimed {}),
-                    None => Ok(token),
-                })?;
-
-            contract.tokens_uri
-                .update(deps.storage, token_uri, |old| match old {
-                    Some(_) => Err(ContractError::Claimed {}),
-                    None => Ok(token_uri.clone()),
-                })?;
+            Configuration::store_token::<Metadata>(deps.storage, token_id, &token)?;
 
             contract.increment_tokens(deps.storage)?;
 
@@ -133,7 +127,9 @@ pub mod entry {
                 .add_attribute("minter", minter)
                 .add_attribute("token_id", token_id))
         } else {
-            Err(ContractError::Std(StdError::generic_err("Unable to deserialize attributes".to_string())))
+            Err(ContractError::Std(StdError::generic_err(
+                "Unable to deserialize attributes".to_string(),
+            )))
         }
     }
 }

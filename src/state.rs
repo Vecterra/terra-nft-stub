@@ -4,6 +4,7 @@ use serde::Serialize;
 use cosmwasm_std::{Addr, Api, Response, StdError, StdResult, Storage};
 use cw721::NftInfoResponse;
 use cw721_base::state::TokenInfo;
+use cw721_base::ContractError;
 use cw721_metadata_onchain::Metadata;
 use cw_storage_plus::{Index, IndexList, IndexedMap, Item, MultiIndex};
 
@@ -15,6 +16,16 @@ pub struct TokenIndexString<'a> {
     pub owner: MultiIndex<'a, (String, Vec<u8>), String>,
 }
 
+impl<'a, T> IndexList<TokenInfo<T>> for TokenIndexes<'a, T>
+where
+    T: Serialize + DeserializeOwned + Clone,
+{
+    fn get_indexes(&'_ self) -> Box<dyn Iterator<Item = &'_ dyn Index<TokenInfo<T>>> + '_> {
+        let v: Vec<&dyn Index<TokenInfo<T>>> = vec![&self.owner];
+        Box::new(v.into_iter())
+    }
+}
+
 impl<'a> IndexList<String> for TokenIndexString<'a> {
     fn get_indexes(&'_ self) -> Box<dyn Iterator<Item = &'_ dyn Index<String>> + '_> {
         let v: Vec<&dyn Index<String>> = vec![&self.owner];
@@ -22,10 +33,9 @@ impl<'a> IndexList<String> for TokenIndexString<'a> {
     }
 }
 
-pub struct Configuration<'a> {
+pub struct Configuration {
     pub always_owner: Option<String>,
     pub static_token: Option<String>,
-    pub token_uris: IndexedMap<'a, &'a str, String, TokenIndexString<'a>>,
 }
 
 pub fn token_owner_idx<T>(d: &TokenInfo<T>, k: Vec<u8>) -> (Addr, Vec<u8>) {
@@ -45,21 +55,75 @@ pub fn token_owner_idx_string(d: &String, k: Vec<u8>) -> (String, Vec<u8>) {
     (d.clone(), k)
 }
 
-impl<'a> Configuration<'_> {
-    pub fn from_msg(msg: &InstantiateMsg) -> Configuration {
-        let indexes: TokenIndexes<'_, Metadata> = TokenIndexes {
-            owner: MultiIndex::new(token_owner_idx, "tokens", "tokens__owner"),
-        };
+impl Configuration {
+    pub fn from_msg<T>(msg: &InstantiateMsg) -> Configuration
+    where
+        T: Serialize + DeserializeOwned + Clone,
+    {
+        Configuration {
+            always_owner: msg.always_owner.clone(),
+            static_token: msg.static_token.clone(),
+        }
+    }
 
+    fn indexed_token_uris<'a>() -> IndexedMap<'a, &'a str, String, TokenIndexString<'a>> {
         let uri_indexes = TokenIndexString {
             owner: MultiIndex::new(token_owner_idx_string, "tokens_uri", "tokens_uri__owner"),
         };
 
-        Configuration {
-            always_owner: msg.always_owner.clone(),
-            static_token: msg.static_token.clone(),
-            token_uris: IndexedMap::new("tokens", uri_indexes),
+        IndexedMap::new("tokens_uri", uri_indexes)
+    }
+
+    fn indexed_tokens<'a, T>() -> IndexedMap<'a, &'a str, TokenInfo<T>, TokenIndexes<'a, T>>
+    where
+        T: Serialize + DeserializeOwned + Clone,
+    {
+        let indexes = TokenIndexes {
+            owner: MultiIndex::new(token_owner_idx, "tokens", "tokens__owner"),
+        };
+
+        IndexedMap::new("tokens", indexes)
+    }
+
+    pub fn claimed<'a>(
+        store: &mut dyn Storage,
+        token_uri: &'a str,
+    ) -> Result<&'a str, ContractError> {
+        let tokens_store = Configuration::indexed_token_uris();
+
+        if let Ok(_x) = tokens_store.load(store, token_uri) {
+            return Err(ContractError::Claimed {});
         }
+
+        Ok(token_uri)
+    }
+
+    pub fn store_token_by_uri<'a, T>(
+        store: &mut dyn Storage,
+        token_uri: &'a str,
+    ) -> Result<&'a str, ContractError> {
+        Configuration::indexed_token_uris().update(store, token_uri, |old| match old {
+            Some(_) => Err(ContractError::Claimed {}),
+            None => Ok(token_uri.to_string()),
+        })?;
+
+        Ok(token_uri)
+    }
+
+    pub fn store_token<'a, T>(
+        store: &mut dyn Storage,
+        token_id: &'a str,
+        token: &'a TokenInfo<T>,
+    ) -> Result<&'a TokenInfo<T>, ContractError>
+    where
+        T: Serialize + DeserializeOwned + Clone,
+    {
+        Configuration::indexed_tokens().update(store, token_id, |old| match old {
+            Some(_) => Err(ContractError::Claimed {}),
+            None => Ok(token.clone()),
+        })?;
+
+        Ok(token)
     }
 
     pub fn store(&self, api: &dyn Api, store: &mut dyn Storage) -> StdResult<Response> {
@@ -97,7 +161,7 @@ impl<'a> Configuration<'_> {
     }
 
     pub fn get_static_token(store: &dyn Storage) -> StdResult<NftInfoResponse<Metadata>> {
-        if let Ok(stub_str) = Item::<'a, String>::new("static_token").load(store) {
+        if let Ok(stub_str) = Item::<'_, String>::new("static_token").load(store) {
             let result = serde_json_wasm::from_str(&stub_str);
 
             if let Ok(extension) = result {
