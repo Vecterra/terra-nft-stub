@@ -115,8 +115,12 @@ pub mod entry {
 
             Configuration::claimed(deps.storage, token_uri)?;
             Configuration::store_token_by_uri::<Metadata>(deps.storage, token_uri)?;
-
-            Configuration::store_token::<Metadata>(deps.storage, token_id, &token)?;
+            contract
+                .tokens
+                .update(deps.storage, token_id, |old| match old {
+                    Some(_) => Err(ContractError::Claimed {}),
+                    None => Ok(token.clone()),
+                })?;
 
             contract.increment_tokens(deps.storage)?;
 
