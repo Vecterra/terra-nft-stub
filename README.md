@@ -57,6 +57,9 @@ TerraPeeps helped understand handling custom messages, querying and storage.
 R.E.S.T. helped thinking about structuring smart contract code and how to reuse the reference
 implementation in CW721 base and CW721 Metadata Onchain.
 
+The [astroport_fi factory project](https://github.com/astroport-fi/astroport-lbport/tree/ee24a0c532ec01a8af61ef58d5efc689bded1a16/contracts/factory) also helped understand how to test and verify how `query_wasm_smart`
+works, and can be tested.
+
 This is still a project created to help learn about smart contracts on Terra, and also learn and
 pratctice Rust, though.
 Any suggestions on how to improve the structure of the code or how to write more effective Rust are
