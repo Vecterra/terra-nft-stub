@@ -26,6 +26,11 @@ address, minter address, etc.
 After running each script, you can use the TX hash returned by the script to look up the
 transaction in finder and then copy the required details to the next script that you need to run.
 
+This smart contract makes use of the
+[cw721-base](https://github.com/CosmWasm/cw-nfts/tree/main/contracts/cw721-base) and [cw721-metadata-onchain](https://github.com/CosmWasm/cw-nfts/tree/main/contracts/cw721-metadata-onchain) reference implementations specifically so that tokens can be deserialized within other contracts using the same token structs.
+A smart contract can import both of the references crates and use the structs in those packages to
+deserialize a token when calling `query_wasm_smart`.
+
 ## Ideas and suggestions
 
 Please submit ideas for extending and improving this testing contract as an issue.
